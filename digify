@@ -1,0 +1,171 @@
+#!/usr/bin/env php
+<?php
+require_once __DIR__ . '/vendor/autoload.php';
+
+use Core\DotEnv;
+use Core\Database;
+
+DotEnv::load(__DIR__ . '/.env');
+
+$command = $argv[1] ?? null;
+$name = $argv[2] ?? null;
+
+if (!$command) {
+    echo "Digify CLI Tool\n";
+    echo "Usage: php digify [command] [name]\n\n";
+    echo "Available commands:\n";
+    echo "  make:controller  Create a new controller\n";
+    echo "  make:model       Create a new model\n";
+    echo "  make:migration   Create a new database migration file\n";
+    echo "  migrate          Run all pending migrations\n";
+    echo "  migrate:rollback Rollback the last migration batch\n";
+    echo "  db:seed          Run the database seeder\n";
+    echo "  key:generate     Generate a new APP_KEY\n";
+    exit;
+}
+
+switch ($command) {
+    case 'make:controller':
+        if (!$name) die("Error: Controller name required.\n");
+        $template = "<?php\nnamespace App\Controllers;\n\nuse Core\\View;\n\nclass {$name} {\n    public function index() {\n        return View::render('home', ['title' => '{$name}']);\n    }\n}\n";
+        file_put_contents(__DIR__ . "/app/Controllers/{$name}.php", $template);
+        echo "Controller {$name} created successfully!\n";
+        break;
+
+    case 'make:model':
+        if (!$name) die("Error: Model name required.\n");
+        $table = strtolower($name) . "s"; // Basic pluralization
+        $template = "<?php\nnamespace App\Models;\n\nuse Core\\Model;\n\nclass {$name} extends Model {\n    protected static string \$table = '{$table}';\n}\n";
+        file_put_contents(__DIR__ . "/app/Models/{$name}.php", $template);
+        echo "Model {$name} created successfully!\n";
+        break;
+
+  case 'make:migration':
+        if (!$name) die("Error: Migration name required (e.g., create_users_table).\n");
+        $timestamp = date('Y_m_d_His');
+        $filename = "{$timestamp}_{$name}.sql";
+        if (!is_dir(__DIR__ . '/database/migrations')) mkdir(__DIR__ . '/database/migrations', 0777, true);
+        
+        // Try to intelligently guess the table name from the migration name
+        $tableName = 'your_table_name';
+        if (preg_match('/create_(.*)_table/i', $name, $matches)) {
+            $tableName = $matches[1]; // Extracts 'users' from 'create_users_table'
+        } elseif (preg_match('/create_(.*)/i', $name, $matches)) {
+            $tableName = $matches[1]; // Extracts 'users' from 'create_users'
+        } else {
+            $tableName = $name; // Fallback to exactly what was typed
+        }
+        
+        $template = "-- UP\nCREATE TABLE IF NOT EXISTS `{$tableName}` (\n    `id` INT AUTO_INCREMENT PRIMARY KEY,\n    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n);\n\n-- DOWN\nDROP TABLE IF EXISTS `{$tableName}`;";
+        
+        file_put_contents(__DIR__ . "/database/migrations/{$filename}", $template);
+        echo "Migration {$filename} created successfully for table '{$tableName}'!\n";
+        break;
+
+    case 'migrate':
+        $dbName = $_ENV['DB_DATABASE'];
+        
+        try {
+            // Try to get a connection
+            $db = Database::getConnection();
+        } catch (\Exception $e) {
+            // Check if error is "Unknown database" (SQLState 1049 for MySQL)
+            if (str_contains($e->getMessage(), '1049') || str_contains($e->getMessage(), 'Unknown database')) {
+                echo "Database '$dbName' does not exist.\n";
+                echo "Would you like to create it? (y/n): ";
+                $handle = fopen("php://stdin", "r");
+                $line = fgets($handle);
+                
+                if (trim(strtolower($line)) != 'y') {
+                    echo "Migration aborted.\n";
+                    exit;
+                }
+
+                echo "Creating database '$dbName'...\n";
+                Database::createDatabase($dbName);
+                
+                // Now that it exists, get the connection
+                $db = Database::getConnection();
+            } else {
+                // If it's a different error (wrong password, etc.), re-throw
+                throw $e;
+            }
+        }
+
+        // --- Original Migration Logic Starts Here ---
+        $db->exec("CREATE TABLE IF NOT EXISTS migrations (id INT AUTO_INCREMENT PRIMARY KEY, migration VARCHAR(255), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+        
+        $applied = $db->query("SELECT migration FROM migrations")->fetchAll(PDO::FETCH_COLUMN);
+        $files = glob(__DIR__ . '/database/migrations/*.sql');
+        
+        if (empty($files)) {
+            echo "No migrations found.\n";
+            exit;
+        }
+
+        foreach ($files as $file) {
+            $migrationName = basename($file);
+            if (!in_array($migrationName, $applied)) {
+                $sql = file_get_contents($file);
+                $upSql = explode('-- DOWN', $sql)[0]; 
+                
+                $db->exec($upSql);
+                $stmt = $db->prepare("INSERT INTO migrations (migration) VALUES (:migration)");
+                $stmt->execute(['migration' => $migrationName]);
+                echo "Migrated: $migrationName\n";
+            }
+        }
+        echo "Migration sequence complete.\n";
+        break;
+
+    case 'migrate:rollback':
+        $db = Database::getConnection();
+        $stmt = $db->query("SELECT * FROM migrations ORDER BY id DESC LIMIT 1");
+        $lastMigration = $stmt->fetch();
+
+        if ($lastMigration) {
+            $file = __DIR__ . '/database/migrations/' . $lastMigration->migration;
+            if (file_exists($file)) {
+                $sql = file_get_contents($file);
+                // Extract only the DOWN portion
+                $parts = explode('-- DOWN', $sql);
+                if (isset($parts[1])) {
+                    $db->exec(trim($parts[1]));
+                    $stmt = $db->prepare("DELETE FROM migrations WHERE id = :id");
+                    $stmt->execute(['id' => $lastMigration->id]);
+                    echo "Rolled back: {$lastMigration->migration}\n";
+                }
+            }
+        } else {
+            echo "Nothing to rollback.\n";
+        }
+        break;
+
+    case 'db:seed':
+        if (!is_dir(__DIR__ . '/database/seeds')) mkdir(__DIR__ . '/database/seeds', 0777, true);
+        $seedFile = __DIR__ . '/database/seeds/DatabaseSeeder.php';
+        
+        if (!file_exists($seedFile)) {
+            $template = "<?php\nnamespace Database\\Seeds;\n\nclass DatabaseSeeder {\n    public function run() {\n        // echo \"Seeding Database...\\n\";\n    }\n}\n";
+            file_put_contents($seedFile, $template);
+            echo "DatabaseSeeder created. Add your logic and run again.\n";
+            break;
+        }
+        
+        require_once $seedFile;
+        $seeder = new \Database\Seeds\DatabaseSeeder();
+        $seeder->run();
+        echo "Database seeded successfully.\n";
+        break;
+
+    case 'key:generate':
+        $key = bin2hex(random_bytes(32));
+        $env = file_get_contents(__DIR__ . '/.env');
+        $env = preg_replace('/APP_KEY=.*/', 'APP_KEY=' . $key, $env);
+        file_put_contents(__DIR__ . '/.env', $env);
+        echo "App key generated: $key\n";
+        break;
+        
+    default:
+        echo "Command not recognized.\n";
+}

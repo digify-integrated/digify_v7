@@ -1,57 +1,21 @@
 <?php
 namespace App\Services;
 
-use Exception;
-
-/**
- * SmsService
- * Wrapper for SMS gateway integration.
- */
-class SmsService
-{
+class SmsService {
     /**
-     * Send an SMS message.
-     * * @param string $phone Recipient phone number
-     * @param string $message Message content
-     * @return bool True if success, false if failed (errors are logged)
+     * Sends an SMS message.
+     * Requires integration with an SMS gateway (e.g., Twilio, Semaphore).
      */
-    public function sendSms(string $phone, string $message): bool 
-    {
-        $phone = $this->formatPhoneNumber($phone);
+    public static function send(string $phoneNumber, string $message): bool {
+        // Pseudo-code for an SMS API call
+        $apiUrl = $_ENV['SMS_API_URL'] ?? 'https://api.sms-gateway.com/send';
+        $apiKey = $_ENV['SMS_API_KEY'] ?? 'your_api_key';
+
+        // In a real scenario, you would use cURL or Guzzle here to send the payload
+        // file_get_contents("$apiUrl?key=$apiKey&to=$phoneNumber&msg=" . urlencode($message));
         
-        if (empty($phone)) {
-            error_log("SmsService Error: Invalid phone number provided.");
-            return false;
-        }
-
-        try {
-            /**
-             * TODO: Implementation Example (Infobip/Twilio)
-             * * $response = $this->gateway->send($phone, $message);
-             * if (!$response->isSuccess()) {
-             * throw new Exception($response->getErrorMessage());
-             * }
-             */
-
-            // Simulation of a successful API call
-            return true; 
-        }
-        catch (Exception $e) {
-            error_log("SmsService Error: " . $e->getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Basic phone number normalization.
-     * Ensures the number is numeric and strips unwanted characters.
-     */
-    private function formatPhoneNumber(string $phone): string 
-    {
-        // Remove everything except digits and the plus sign
-        $normalized = preg_replace('/[^\d+]/', '', $phone);
-        
-        // Basic check: minimum length for a valid international number
-        return (strlen($normalized) >= 7) ? $normalized : '';
+        // Simulating success for the framework skeleton
+        error_log("SMS sent to $phoneNumber: $message");
+        return true;
     }
 }

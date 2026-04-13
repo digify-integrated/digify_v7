@@ -1,0 +1,8 @@
+-- UP
+CREATE TABLE IF NOT EXISTS `user_account` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- DOWN
+DROP TABLE IF EXISTS `user_account`;

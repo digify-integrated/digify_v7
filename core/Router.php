@@ -51,6 +51,10 @@ class Router {
         $path = $request->getUri();
         $method = $request->getMethod();
 
+        if ($path !== '/') {
+            $path = rtrim($path, '/');
+        }
+
         foreach ($this->routes[$method] ?? [] as $route => $action) {
             // Convert {id} to named regex groups
             $pattern = preg_replace('/\{([a-zA-Z0-9_]+)\}/', '(?P<\1>[a-zA-Z0-9_]+)', $route);
